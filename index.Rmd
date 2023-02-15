@@ -1,0 +1,352 @@
+---
+title: "Cluster and Factor Analysis of Country Data"
+output:
+  html_document:
+    df_print: paged
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+
+## Cluster Analysis
+```{r}
+# clean memory
+rm(list = ls())
+
+# reading in data via Github link
+file <-("https://github.com/Policy-by-the-Numbers/deliverable2/raw/main/deli2dataset_new.csv")
+data <-read.csv(file, row.names=NULL)
+
+# reset indexes to R paradigm
+
+
+#check data types
+str(data)
+
+```
+```{r}
+# Preparing data
+
+# I think we want to keep all of these variables but the name
+clusterData=data[,c(2:13)]
+
+#save the country names as the row index
+row.names(clusterData)=data$name
+
+clusterData
+```
+
+
+```{r}
+# computing distance matrix
+
+set.seed(999)
+```
+
+```{r}
+library(cluster)
+distanceMatrix=daisy(x=clusterData, metric = "gower")
+```
+```{r}
+projectedData = cmdscale(distanceMatrix, k=2)
+```
+
+```{r}
+# save coordinates to original data frame:
+data$dim1 = projectedData[,1]
+data$dim2 = projectedData[,2]
+
+# see some:
+
+data[,c('dim1','dim2')][1:10,]
+```
+
+```{r}
+library(ggplot2)
+base= ggplot(data=data,
+             aes(x=dim1, y=dim2,
+                 label=name)) 
+base + geom_text(size=2)
+```
+
+```{r}
+# prepare hierarchical cluster
+hc = hclust(distanceMatrix)
+# very simple dendrogram
+plot(hc,hang = -1,cex=0.5)
+```
+
+```{r}
+# Computing clusters
+library(factoextra)
+
+
+```
+
+```{r}
+# Hierarchical (agglomerative) method:
+
+fviz_nbclust(clusterData, 
+             hcut,
+             diss=distanceMatrix,
+             method = "gap_stat",
+             k.max = 10,
+             verbose = F,
+             hc_func = "agnes")
+```
+
+```{r}
+# Hierarchical (divisive) method:
+fviz_nbclust(clusterData, 
+             hcut,
+             diss=distanceMatrix,
+             method = "gap_stat",
+             k.max = 10,
+             verbose = F,
+             hc_func = "diana")
+```
+
+2. Computing Clusters
+```{r}
+# Computing clusters:
+
+NumberDesiredClusters=1 #both methods had 1 as optimal no. of clusters
+# this doesn't even mean anything
+
+# Hierarchical - agglom:
+res.agnes= hcut(distanceMatrix, 
+                k = NumberDesiredClusters,
+                isdiss=TRUE,
+                hc_func='agnes',
+                hc_method = "ward.D2")
+
+# Hierarchical - divisive:
+res.diana= hcut(distanceMatrix, 
+                k = NumberDesiredClusters,
+                isdiss=TRUE,
+                hc_func='diana',
+                hc_method = "ward.D2")
+
+```
+
+3. Results from Clustering
+```{r}
+# Results from Clustering
+
+# Saving results to original dataframe
+data$agn=as.factor(res.agnes$cluster)
+data$dia=as.factor(res.diana$cluster)
+```
+
+```{r}
+# verify ordinality in clusters
+
+ #aggregate(data=fromPy,
+         #Overallscore~agn,
+          #UN=mean)
+
+##aggregate(data=fromPy,
+           #Overallscore~dia,
+            #UN=mean)
+
+# this part is confusing to me
+# may not be necessary for this dataset?
+```
+4. Evaluating Results
+```{r}
+# Plot silhouettes
+# agglom silh
+fviz_silhouette(res.agnes)
+```
+```{r}
+# divisive silh
+fviz_silhouette(res.diana)
+```
+
+```{r}
+# detecting cases wrongly clustered
+
+#saving individual silhouettes
+agnEval=data.frame(res.agnes$silinfo$widths)
+diaEval=data.frame(res.diana$silinfo$widths)
+
+agnPoor=rownames(agnEval[agnEval$sil_width<0,])
+diaPoor=rownames(diaEval[diaEval$sil_width<0,])
+```
+
+```{r}
+# now seeing which countries are not well clustered
+library("qpcR") 
+bad_Clus=as.data.frame(qpcR:::cbind.na(sort(agnPoor),
+                                       sort(diaPoor)))
+names(bad_Clus)=c("agn","dia")
+bad_Clus
+```
+How to compare clustering?
+```{r}
+# hierarchical agglom:
+base= ggplot(data=data,
+             aes(x=dim1, y=dim2,
+                 label=name)) 
+agnPlot=base + labs(title = "AGNES") + geom_point(size=2,
+                                              aes(color=agn),
+                                              show.legend = T)
+
+
+# hierarchical diana:
+diaPlot=base + labs(title = "DIANA") + geom_point(size=2,
+                                              aes(color=dia),
+                                              show.legend = T) 
+
+# compare visually:
+library(ggpubr)
+
+ggarrange(agnPlot, diaPlot,ncol = 2,common.legend = T)
+
+```
+
+Producing dendograms for the results
+```{r}
+# Agglomerative
+fviz_dend(res.agnes,
+          k=NumberDesiredClusters,
+          cex = 0.45, 
+          horiz = T,
+          main = "AGNES approach")
+```
+
+```{r}
+# Divisive approach:
+fviz_dend(res.diana,
+          k=NumberDesiredClusters,
+          cex = 0.45, 
+          horiz = T,
+          main = "DIANA approach")
+```
+
+
+
+
+We fail to find any meaningful results from the clustering data because it grouped all the countries into one cluster. Let's try a factor analysis of the same country-level data.
+
+
+##FACTOR ANALYSIS
+
+1. Subset original data frame
+```{r}
+FAdata=clusterData
+
+```
+
+2. Compute correlations
+```{r}
+library(polycor)
+corMatrix=polycor::hetcor(FAdata)$correlations
+
+# visualizing matrix
+library(ggcorrplot)
+
+ggcorrplot(corMatrix,
+           type = "lower") + 
+          theme(axis.text.x  = element_text(size = 5),
+                axis.text.y  = element_text(size = 5))
+
+# looks terrible tbh
+```
+
+3. check conditions
+
+```{r}
+# the amount of data should be enough for the correlation process:
+library(psych)
+psych::KMO(corMatrix)
+
+# note: does not meet the threshold for KMO
+```
+
+The correlation matrix should not be an identity matrix:
+```{r}
+# is identity matrix?
+cortest.bartlett(corMatrix,n=nrow(FAdata))$p.value>0.05
+```
+
+The correlation matrix should not be singular
+```{r}
+library(matrixcalc)
+
+is.singular.matrix(corMatrix)
+```
+4. Get suggestions for amount of clusters
+```{r}
+fa.parallel(FAdata, fa = 'fa',correct = T,plot = F)
+```
+5. Compute the factors
+```{r}
+library(GPArotation)
+resfa <- fa(FAdata,
+            nfactors = 5,
+            cor = 'mixed',
+            rotate = "varimax",
+            fm="minres")
+
+```
+
+6. Explore results
+```{r}
+### see results
+print(resfa$loadings,cutoff = 0.5)
+```
+
+```{r}
+fa.diagram(resfa,main = "EFA results")
+```
+8. Improving factor analysis
+```{r}
+ps=c("mtonsco2emissions", "alcliterspercapita", "percentgdpmilitary", "internetusers")
+notPs=setdiff(names(FAdata),ps)
+FAdata2=FAdata[,notPs]
+```
+
+recompute correlations
+```{r}
+library(polycor)
+corMatrix2=polycor::hetcor(FAdata2)$correlations
+```
+
+Recheck conditions: MSA
+```{r}
+library(psych)
+psych::KMO(corMatrix2) 
+# MSA improved! barely meets threshold!
+```
+Recheck conditions: bartlett
+```{r}
+cortest.bartlett(corMatrix2,n=nrow(FAdata2))$p.value>0.05
+```
+Recheck conditions: singularity
+```{r}
+library(matrixcalc)
+
+is.singular.matrix(corMatrix2)
+```
+
+Now get new suggestions
+```{r}
+fa.parallel(FAdata2, fa = 'fa',correct = T,plot = F)
+```
+Compute factors again
+```{r}
+library(GPArotation)
+resfa <- fa(FAdata2,
+            nfactors = 3,
+            cor = 'mixed',
+            rotate = "varimax",
+            fm="minres")
+# Displaying results
+fa.diagram(resfa,main = "EFA results (2)")
+```
+
+We end up with three factors: MR1 has child mortality rate, total fertility rate, education expeditures (negatively correlated) and energy consumption per capita (negatively correlated) as components, MR2 has net migration rate and inflation rate as components, and MR3 has unemployment rate and gini coefficent as components. I hypothesize that MR1 represents the latent concept of a country's development level as I expect chid mortality rate and total fertility rate to be positively correlated with development level and education expenditures and energy consumption to be negatively correlated with a country's development level. I hypothesize that MR3 represents a country's inequality, as that factor is positively correlated with the Gini coefficient and unemployment rate. This is a stretch but I hypothesize MR2 to represent scarcity, as scarcity is positively correlated with inflation rate and migration rate. It should be noted though, that with an MSA of 0.61, the factor scores are likely not completely accurate.
+

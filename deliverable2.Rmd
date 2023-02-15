@@ -1,5 +1,5 @@
 ---
-title: "Cluster Analysis of Country Data"
+title: "Cluster and Factor Analysis of Country Data"
 output: html_notebook
 ---
 
@@ -7,16 +7,18 @@ This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute
 
 Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
 
+
+## Cluster Analysis
 ```{r}
 # clean memory
 rm(list = ls())
 
 # reading in data via Github link
-file <-("https://github.com/Policy-by-the-Numbers/deliverable2/raw/main/deli2dataset.csv")
-data <-read.csv(file)
+file <-("https://github.com/Policy-by-the-Numbers/deliverable2/raw/main/deli2dataset_new.csv")
+data <-read.csv(file, row.names=NULL)
 
 # reset indexes to R paradigm
-row.names(data)=NULL
+
 
 #check data types
 str(data)
@@ -26,7 +28,7 @@ str(data)
 # Preparing data
 
 # I think we want to keep all of these variables but the name
-clusterData=data[,c(2:10)]
+clusterData=data[,c(2:13)]
 
 #save the country names as the row index
 row.names(clusterData)=data$name
@@ -108,7 +110,8 @@ fviz_nbclust(clusterData,
 ```{r}
 # Computing clusters:
 
-NumberDesiredClusters=3 #both methods had 3 as optimal no. of clusters
+NumberDesiredClusters=1 #both methods had 1 as optimal no. of clusters
+# this doesn't even mean anything
 
 # Hierarchical - agglom:
 res.agnes= hcut(distanceMatrix, 
@@ -154,7 +157,6 @@ data$dia=as.factor(res.diana$cluster)
 # Plot silhouettes
 # agglom silh
 fviz_silhouette(res.agnes)
-
 ```
 ```{r}
 # divisive silh
@@ -225,11 +227,10 @@ fviz_dend(res.diana,
 
 
 
+We fail to find any meaningful results from the clustering data because it grouped all the countries into one cluster. Let's try a factor analysis of the same country-level data.
 
-Ok I actually wnted to do factor analysis so I am doing that here
 
-
-FACTOR ANALYSIS
+##FACTOR ANALYSIS
 
 1. Subset original data frame
 ```{r}
@@ -260,11 +261,90 @@ ggcorrplot(corMatrix,
 library(psych)
 psych::KMO(corMatrix)
 
-# need more/better data to do factor analysis
+# note: does not meet the threshold for KMO
 ```
 
-Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+The correlation matrix should not be an identity matrix:
+```{r}
+# is identity matrix?
+cortest.bartlett(corMatrix,n=nrow(FAdata))$p.value>0.05
+```
 
-When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+The correlation matrix should not be singular
+```{r}
+library(matrixcalc)
 
-The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+is.singular.matrix(corMatrix)
+```
+4. Get suggestions for amount of clusters
+```{r}
+fa.parallel(FAdata, fa = 'fa',correct = T,plot = F)
+```
+5. Compute the factors
+```{r}
+library(GPArotation)
+resfa <- fa(FAdata,
+            nfactors = 5,
+            cor = 'mixed',
+            rotate = "varimax",
+            fm="minres")
+
+```
+
+6. Explore results
+```{r}
+### see results
+print(resfa$loadings,cutoff = 0.5)
+```
+
+```{r}
+fa.diagram(resfa,main = "EFA results")
+```
+8. Improving factor analysis
+```{r}
+ps=c("mtonsco2emissions", "alcliterspercapita", "percentgdpmilitary", "internetusers")
+notPs=setdiff(names(FAdata),ps)
+FAdata2=FAdata[,notPs]
+```
+
+recompute correlations
+```{r}
+library(polycor)
+corMatrix2=polycor::hetcor(FAdata2)$correlations
+```
+
+Recheck conditions: MSA
+```{r}
+library(psych)
+psych::KMO(corMatrix2) 
+# MSA improved! barely meets threshold!
+```
+Recheck conditions: bartlett
+```{r}
+cortest.bartlett(corMatrix2,n=nrow(FAdata2))$p.value>0.05
+```
+Recheck conditions: singularity
+```{r}
+library(matrixcalc)
+
+is.singular.matrix(corMatrix2)
+```
+
+Now get new suggestions
+```{r}
+fa.parallel(FAdata2, fa = 'fa',correct = T,plot = F)
+```
+Compute factors again
+```{r}
+library(GPArotation)
+resfa <- fa(FAdata2,
+            nfactors = 3,
+            cor = 'mixed',
+            rotate = "varimax",
+            fm="minres")
+# Displaying results
+fa.diagram(resfa,main = "EFA results (2)")
+```
+
+We end up with three factors: MR1 has child mortality rate, total fertility rate, education expeditures (negatively correlated) and energy consumption per capita (negatively correlated) as components, MR2 has net migration rate and inflation rate as components, and MR3 has unemployment rate and gini coefficent as components. I hypothesize that MR1 represents the latent concept of a country's development level as I expect chid mortality rate and total fertility rate to be positively correlated with development level and education expenditures and energy consumption to be negatively correlated with a country's development level. I hypothesize that MR3 represents a country's inequality, as that factor is positively correlated with the Gini coefficient and unemployment rate. This is a stretch but I hypothesize MR2 to represent scarcity, as scarcity is positively correlated with inflation rate and migration rate. It should be noted though, that with an MSA of 0.61, the factor scores are likely not completely accurate.
+
